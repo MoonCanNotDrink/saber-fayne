@@ -97,6 +97,7 @@ jobs:
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs output/Saber-Fayne-Stylus-Test-arm64.apk > output/apk-signature.txt
           cd output
           sha256sum Saber-Fayne-Stylus-Test-arm64.apk > SHA256SUMS
+          printf '::notice title=APK SHA-256::%s\n' "$(cat SHA256SUMS)"
           {
             printf 'Source commit: `%s`\n\n' "$GITHUB_SHA"
             printf 'APK identity, callback isolation, provider authorities, and signature checks passed.\n\n'
