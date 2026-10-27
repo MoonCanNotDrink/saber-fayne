@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:label="Saber Fayne Test"
+        tools:replace="android:label">
+        <!-- Test login uses the existing Nextcloud v2 polling protocol in the
+             external browser. Never register the official app's nc callback. -->
+        <activity
+            android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
+            tools:node="remove" />
+        <provider
+            android:name="com.superlist.super_native_extensions.DataProvider"
+            android:authorities="${applicationId}.SuperClipboardDataProvider"
+            tools:replace="android:authorities" />
+    </application>
+</manifest>

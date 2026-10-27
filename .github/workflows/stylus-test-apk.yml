@@ -1,0 +1,110 @@
+name: Stylus priority test APK
+
+on:
+  workflow_dispatch:
+  # A new workflow cannot be dispatched until registered on the default branch.
+  # This isolated branch trigger permits testing without changing pristine main.
+  push:
+    branches: [feature/stylus-palm-rejection]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stylus-test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-apk:
+    if: github.repository == 'MoonCanNotDrink/saber-fayne' && github.ref == 'refs/heads/feature/stylus-palm-rejection'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/shared_workflows/install_apt_dependencies
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: adil192/setup-flutter-submodule@v3
+        with:
+          flutter-path: submodules/flutter
+          no-save-caches: true
+
+      - name: Verify pinned SDK and locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C submodules/flutter rev-parse HEAD)" = "$(git rev-parse HEAD:submodules/flutter)"
+          flutter config --no-analytics --no-cli-animations
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.yaml pubspec.lock
+          mkdir -p output
+          flutter --version --machine > output/flutter-version.json
+          git rev-parse HEAD > output/commit.txt
+
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      - name: Check APK isolation validator
+        run: python3 -m unittest discover -s .github/scripts -p 'test_verify_stylus_test_manifest.py'
+
+      - name: Run local stylus and test-login checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test --no-pub --concurrency=4 --file-reporter=json:output/test-results.json \
+            test/stylus_test.dart test/stylus_priority_test.dart test/test_apk_login_test.dart
+
+      - name: Install pinned Android tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk_version=$(sed -nE 's/.*val ndkVersion: String = "([^"]+)".*/\1/p' submodules/flutter/packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt)
+          test -n "$ndk_version"
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' "ndk;$ndk_version"
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/$ndk_version" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk_version" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ndk_version" >> "$GITHUB_ENV"
+
+      - name: Build independently installable ARM64 test APK
+        env:
+          ORG_GRADLE_PROJECT_saberTestApk: 'true'
+        run: >-
+          flutter build apk --release --no-pub --flavor stylusTest
+          --target-platform android-arm64 --dart-define=UPDATE_CHECK=false
+
+      - name: Verify actual APK identity, signature and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp build/app/outputs/flutter-apk/app-stylustest-release.apk output/Saber-Fayne-Stylus-Test-arm64.apk
+          apkanalyzer manifest print output/Saber-Fayne-Stylus-Test-arm64.apk > output/android-manifest.xml
+          python3 .github/scripts/verify_stylus_test_manifest.py output/android-manifest.xml
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs output/Saber-Fayne-Stylus-Test-arm64.apk > output/apk-signature.txt
+          cd output
+          sha256sum Saber-Fayne-Stylus-Test-arm64.apk > SHA256SUMS
+
+      - name: Upload verified test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: Saber-Fayne-Stylus-Test-${{ github.sha }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve test failure results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Stylus-Test-Failures-${{ github.sha }}
+          path: |
+            output/test-results.json
+            test/failures/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:keybinder/keybinder.dart';
 import 'package:saber/components/canvas/hud/canvas_hud.dart';
 import 'package:saber/components/canvas/interactive_canvas.dart';
+import 'package:saber/components/canvas/stylus_priority.dart';
 import 'package:saber/data/editor/page.dart';
 import 'package:saber/data/extensions/change_notifier_extensions.dart';
 import 'package:saber/data/extensions/matrix4_extensions.dart';
@@ -36,6 +37,7 @@ class CanvasGestureDetector extends StatefulWidget {
     required this.pageBuilder,
     required this.placeholderPageBuilder,
     required this.isTextEditing,
+    this.stylusPriority,
     TransformationController? transformationController,
   }) : _transformationController =
            transformationController ?? TransformationController();
@@ -66,6 +68,7 @@ class CanvasGestureDetector extends StatefulWidget {
   placeholderPageBuilder;
 
   final bool Function() isTextEditing;
+  final StylusPriorityController? stylusPriority;
 
   late final TransformationController _transformationController;
 
@@ -419,6 +422,7 @@ class CanvasGestureDetectorState extends State<CanvasGestureDetector> {
   }
 
   void _listenerPointerEvent(PointerEvent event) {
+    if (widget.stylusPriority?.shouldReject(event) ?? false) return;
     final isStylus =
         event.kind == PointerDeviceKind.stylus ||
         event.kind == PointerDeviceKind.invertedStylus;
@@ -456,6 +460,9 @@ class CanvasGestureDetectorState extends State<CanvasGestureDetector> {
   void _listenerPointerHoverEvent(PointerEvent event) {
     if (event.kind != .stylus && event.kind != .invertedStylus) return;
 
+    // End any finger stroke before an eraser hover changes the active tool.
+    widget.stylusPriority?.observe(event);
+
     // Apparently flutter synthesizes a hover event on pointer down,
     // so these are used to detect when hovering ends
     if (event.synthesized) {
@@ -477,6 +484,7 @@ class CanvasGestureDetectorState extends State<CanvasGestureDetector> {
   }
 
   void _listenerPointerUpEvent(PointerEvent event) {
+    if (widget.stylusPriority?.shouldReject(event) ?? false) return;
     widget.updatePointerData(event.kind, null);
     if (stylusButtonWasPressed) {
       stylusButtonWasPressed = false;
@@ -494,6 +502,11 @@ class CanvasGestureDetectorState extends State<CanvasGestureDetector> {
           onPointerDown: _listenerPointerEvent,
           onPointerMove: _listenerPointerEvent,
           onPointerUp: _listenerPointerUpEvent,
+          onPointerCancel: (event) {
+            if (widget.stylusPriority?.enabled ?? false) {
+              _listenerPointerUpEvent(event);
+            }
+          },
           onPointerHover: _listenerPointerHoverEvent,
           child: GestureDetector(
             child: LayoutBuilder(
@@ -501,6 +514,7 @@ class CanvasGestureDetectorState extends State<CanvasGestureDetector> {
                 this.containerBounds = containerBounds;
 
                 return InteractiveCanvasViewer.builder(
+                  stylusPriority: widget.stylusPriority,
                   minScale: zoomLockedValue ?? CanvasGestureDetector.kMinScale,
                   maxScale: zoomLockedValue ?? CanvasGestureDetector.kMaxScale,
                   panEnabled: !singleFingerPanLock,

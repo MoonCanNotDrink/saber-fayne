@@ -17,6 +17,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
+import 'package:saber/components/canvas/stylus_priority.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4, Quad, Vector3;
 
 typedef InteractiveCanvasViewerWidgetBuilder = Widget Function(
@@ -38,6 +39,7 @@ class InteractiveCanvasViewer extends StatefulWidget {
     this.maxScale = 2.5,
     this.minScale = 0.8,
     this.isDrawGesture,
+    this.stylusPriority,
     this.interactionEndFrictionCoefficient = kDrag,
     this.onInteractionEnd,
     this.onDrawEnd,
@@ -85,6 +87,7 @@ class InteractiveCanvasViewer extends StatefulWidget {
     this.maxScale = 2.5,
     this.minScale = 0.8,
     this.isDrawGesture,
+    this.stylusPriority,
     this.interactionEndFrictionCoefficient = kDrag,
     this.onInteractionEnd,
     this.onDrawEnd,
@@ -118,6 +121,9 @@ class InteractiveCanvasViewer extends StatefulWidget {
 
   /// The alignment of the child's origin, relative to the size of the box.
   final Alignment? alignment;
+
+  /// Optional editor-scoped arbitration of pen and touch pointer sequences.
+  final StylusPriorityController? stylusPriority;
 
   /// If set to [Clip.none], the child may extend beyond the size of the InteractiveCanvasViewer,
   /// but it will not receive gestures in these areas.
@@ -861,6 +867,11 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
     _controller.reset();
     _scaleController.reset();
 
+    if (widget.stylusPriority?.isCancellingTouches ?? false) {
+      _currentAxis = null;
+      return;
+    }
+
     if (!_gestureIsSupported(_gestureType)) {
       _currentAxis = null;
       return;
@@ -1039,6 +1050,19 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
     setState(() {});
   }
 
+  void _handleStylusPriority() {
+    if (!(widget.stylusPriority?.touchSuppressed ?? false) &&
+        !(widget.stylusPriority?.isCancellingTouches ?? false)) {
+      return;
+    }
+    _animation?.removeListener(_handleInertiaAnimation);
+    _scaleAnimation?.removeListener(_handleScaleAnimation);
+    _animation = null;
+    _scaleAnimation = null;
+    _controller.stop();
+    _scaleController.stop();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1046,11 +1070,17 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
     _scaleController = AnimationController(vsync: this);
 
     _transformer.addListener(_handleTransformation);
+    widget.stylusPriority?.addListener(_handleStylusPriority);
   }
 
   @override
   void didUpdateWidget(InteractiveCanvasViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.stylusPriority != widget.stylusPriority) {
+      oldWidget.stylusPriority?.removeListener(_handleStylusPriority);
+      widget.stylusPriority?.addListener(_handleStylusPriority);
+    }
 
     final TransformationController? newController =
         widget.transformationController;
@@ -1067,6 +1097,7 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
 
   @override
   void dispose() {
+    widget.stylusPriority?.removeListener(_handleStylusPriority);
     _controller.dispose();
     _scaleController.dispose();
     _transformer.removeListener(_handleTransformation);
@@ -1114,13 +1145,28 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
     return Listener(
       key: _parentKey,
       onPointerSignal: _receivedPointerSignal,
-      child: GestureDetector(
+      child: RawGestureDetector(
         behavior: HitTestBehavior.opaque, // Necessary when panning off screen.
-        onScaleEnd: _onScaleEnd,
-        onScaleStart: _onScaleStart,
-        onScaleUpdate: _onScaleUpdate,
-        trackpadScrollCausesScale: widget.trackpadScrollCausesScale,
-        trackpadScrollToScaleFactor: Offset(0, -1 / widget.scaleFactor),
+        gestures: {
+          StylusPriorityScaleGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<
+                StylusPriorityScaleGestureRecognizer
+              >(
+                () => StylusPriorityScaleGestureRecognizer(debugOwner: this),
+                (recognizer) => recognizer
+                  ..controller = widget.stylusPriority
+                  ..onEnd = _onScaleEnd
+                  ..onStart = _onScaleStart
+                  ..onUpdate = _onScaleUpdate
+                  ..dragStartBehavior = DragStartBehavior.start
+                  ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
+                  ..trackpadScrollCausesScale = widget.trackpadScrollCausesScale
+                  ..trackpadScrollToScaleFactor = Offset(
+                    0,
+                    -1 / widget.scaleFactor,
+                  ),
+              ),
+        },
         child: child,
       ),
     );

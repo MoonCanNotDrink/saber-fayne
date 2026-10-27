@@ -8,13 +8,21 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Opt in only for the separately installed hardware-test APK. Ordinary builds
+// remain unflavored and retain all upstream production identifiers.
+val saberTestApk = providers.gradleProperty("saberTestApk")
+    .map { it.toBooleanStrict() }
+    .getOrElse(false)
+
 val keystoreProperties = Properties()
-val keystorePropertiesFile = rootProject.file("key.properties")
-val fallbackKeystorePropertiesFile = rootProject.file("fallback-key.properties")
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-} else if (fallbackKeystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(fallbackKeystorePropertiesFile))
+if (!saberTestApk) {
+    val keystorePropertiesFile = rootProject.file("key.properties")
+    val fallbackKeystorePropertiesFile = rootProject.file("fallback-key.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    } else if (fallbackKeystorePropertiesFile.exists()) {
+        keystoreProperties.load(FileInputStream(fallbackKeystorePropertiesFile))
+    }
 }
 
 android {
@@ -37,20 +45,33 @@ android {
         versionName = flutter.versionName
     }
 
+    if (saberTestApk) {
+        flavorDimensions += "hardwareTest"
+        productFlavors {
+            create("stylusTest") {
+                dimension = "hardwareTest"
+                applicationIdSuffix = ".fayne.stylustest"
+                versionNameSuffix = "-fayne-stylus-test"
+            }
+        }
+    }
+
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
-            storePassword = keystoreProperties["storePassword"] as String
+        if (!saberTestApk) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+                storePassword = keystoreProperties["storePassword"] as String
+            }
         }
     }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName(if (saberTestApk) "debug" else "release")
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName(if (saberTestApk) "debug" else "release")
         }
     }
 

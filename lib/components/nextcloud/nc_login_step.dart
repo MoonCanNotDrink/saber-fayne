@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:nextcloud/core.dart';
 import 'package:nextcloud/nextcloud.dart';
 import 'package:regexed_validator/regexed_validator.dart';
+import 'package:saber/components/nextcloud/test_apk_login_dialog.dart';
 import 'package:saber/components/settings/app_info.dart';
 import 'package:saber/components/theming/adaptive_circular_progress_indicator.dart';
 import 'package:saber/data/nextcloud/login_flow.dart';
@@ -36,10 +37,12 @@ class NcLoginStep extends HookWidget {
     showAdaptiveDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _LoginFlowDialog(loginFlow: loginFlow),
+      builder: (context) => loginFlow.usesTestBrowserLogin
+          ? TestApkLoginDialog(loginFlow: loginFlow)
+          : _LoginFlowDialog(loginFlow: loginFlow),
     );
 
-    loginFlow.future.then((credentials) async {
+    final saveCredentials = loginFlow.future.then((credentials) async {
       final client = NextcloudClient(
         Uri.parse(credentials.server),
         loginName: credentials.loginName,
@@ -65,6 +68,24 @@ class NcLoginStep extends HookWidget {
 
       recheckCurrentStep();
     });
+    if (loginFlow.usesTestBrowserLogin) {
+      // The test dialog owns cancellation/error feedback. Failed or abandoned
+      // flows never reach the existing credential-storage callback above.
+      unawaited(
+        saveCredentials.catchError((Object error, StackTrace stackTrace) {
+          if (context.mounted &&
+              loginFlow.completer.isCompleted &&
+              error is! TestApkLoginCancelled &&
+              error is! TimeoutException) {
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              const SnackBar(
+                content: Text('Test APK login could not finish. Try again.'),
+              ),
+            );
+          }
+        }),
+      );
+    }
 
     return loginFlow;
   }

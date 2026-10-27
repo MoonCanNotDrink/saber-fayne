@@ -37,6 +37,22 @@ Review upstream GitHub issues #1830 and #1730. Check current code instead of ass
 - Do not deploy, publish releases, merge to `main`, submit upstream PRs, or bypass failed tests without explicit user approval.
 - Avoid scope creep and refactors unrelated to touch handling.
 
+### Approved test-only authentication exception
+
+The user has explicitly approved external-browser login exclusively for the
+Android `stylusTest` APK. Gate it with Android platform detection and Flutter's
+actual `appFlavor`, not a general production preference. This APK must have its
+own application ID, label and ContentProvider authorities, and must not register
+the official app's `nc://` callback. Reuse the existing Nextcloud Login Flow v2
+initialisation, polling and credential-storage implementation; do not add an
+authentication protocol or alter production authentication, encryption, WebDAV
+sync or note formats. Handle cancellation, a bounded timeout, backgrounding and
+returning to the app. Browser closure alone cannot be detected by an external
+launcher: give the user explicit cancel/reopen controls. A killed app starts a
+new login attempt rather than persisting a pending authentication token.
+Use mocked transports for cloud tests. Live-account and cross-device
+sync/decryption checks still require the user's separate authorisation.
+
 ## Verification and deliverables
 
 1. Add deterministic tests for stylus-only, pen-first, palm-first, multiple pointers, pointer cancel, hover and no-hover fallbacks, cooldown, toolbar accidental tap prevention, finger navigation recovery, pressure/eraser and the feature-off path.

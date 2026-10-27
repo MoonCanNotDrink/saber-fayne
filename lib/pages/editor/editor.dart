@@ -6,7 +6,8 @@ import 'dart:typed_data';
 import 'package:collapsible/collapsible.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart'
+    show kDebugMode, kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +23,7 @@ import 'package:saber/components/canvas/canvas_gesture_detector.dart';
 import 'package:saber/components/canvas/canvas_image.dart';
 import 'package:saber/components/canvas/image/editor_image.dart';
 import 'package:saber/components/canvas/save_indicator.dart';
+import 'package:saber/components/canvas/stylus_priority.dart';
 import 'package:saber/components/editor/read_only_banner.dart';
 import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_icon.dart';
@@ -104,6 +106,23 @@ class EditorState extends State<Editor> {
 
   final _canvasGestureDetectorKey = GlobalKey<CanvasGestureDetectorState>();
   final _transformationController = TransformationController();
+  late final _stylusPriority = StylusPriorityController(
+    onTakeover: _onStylusTakeover,
+  );
+
+  void _updateStylusPriority() {
+    _stylusPriority.enabled =
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        stows.stylusPriority.value;
+  }
+
+  void _onStylusTakeover() {
+    // The old touch recognizer has ended before the pen enters its own arena.
+    _lastSeenPointerCountTimer?.cancel();
+    lastSeenPointerCount = 0;
+  }
+
   double get scrollY {
     final transformation = _transformationController.value;
     final scale = transformation.approxScale;
@@ -183,6 +202,8 @@ class EditorState extends State<Editor> {
 
   @override
   void initState() {
+    _updateStylusPriority();
+    stows.stylusPriority.addListener(_updateStylusPriority);
     DynamicMaterialApp.addFullscreenListener(_setState);
 
     _initAsync();
@@ -739,6 +760,13 @@ class EditorState extends State<Editor> {
     setState(() {
       if (currentTool is Pen) {
         final newStroke = (currentTool as Pen).onDragEnd();
+        if (_stylusPriority.isCancellingTouches) {
+          // Discard only the in-progress finger stroke at pen takeover.
+          // Actions completed before pen evidence remain in normal history.
+          shouldSave = false;
+          page.redrawStrokes();
+          return;
+        }
         if (newStroke == null) return;
         if (newStroke.isEmpty) return;
 
@@ -1452,6 +1480,7 @@ class EditorState extends State<Editor> {
 
     final Widget canvas = CanvasGestureDetector(
       key: _canvasGestureDetectorKey,
+      stylusPriority: _stylusPriority,
       filePath: coreInfo.filePath,
       isDrawGesture: isDrawGesture,
       onInteractionEnd: onInteractionEnd,
@@ -1693,117 +1722,120 @@ class EditorState extends State<Editor> {
       );
     }
 
-    return ValueListenableBuilder(
-      valueListenable: savingState,
-      builder: (context, savingState, child) {
-        // don't allow user to go back until saving is done
-        return PopScope(
-          canPop: savingState == .saved,
-          onPopInvokedWithResult: (didPop, _) {
-            switch (savingState) {
-              case .waitingToSave:
-                assert(!didPop);
-                saveToFile(); // trigger save now
-                snackBarNeedsToSaveBeforeExiting();
-              case .saving:
-                assert(!didPop);
-                snackBarNeedsToSaveBeforeExiting();
-              case .saved:
-                break;
-            }
-          },
-          child: child!,
-        );
-      },
-      child: Scaffold(
-        appBar: DynamicMaterialApp.isFullscreen
-            ? null
-            : AppBar(
-                toolbarHeight: kToolbarHeight,
-                title: widget.customTitle != null
-                    ? Text(widget.customTitle!)
-                    : Form(
-                        key: _filenameFormKey,
-                        autovalidateMode: AutovalidateMode.onUserInteraction,
-                        child: TextFormField(
-                          decoration: const InputDecoration(
-                            border: InputBorder.none,
+    return StylusPriorityRegion(
+      controller: _stylusPriority,
+      child: ValueListenableBuilder(
+        valueListenable: savingState,
+        builder: (context, savingState, child) {
+          // don't allow user to go back until saving is done
+          return PopScope(
+            canPop: savingState == .saved,
+            onPopInvokedWithResult: (didPop, _) {
+              switch (savingState) {
+                case .waitingToSave:
+                  assert(!didPop);
+                  saveToFile(); // trigger save now
+                  snackBarNeedsToSaveBeforeExiting();
+                case .saving:
+                  assert(!didPop);
+                  snackBarNeedsToSaveBeforeExiting();
+                case .saved:
+                  break;
+              }
+            },
+            child: child!,
+          );
+        },
+        child: Scaffold(
+          appBar: DynamicMaterialApp.isFullscreen
+              ? null
+              : AppBar(
+                  toolbarHeight: kToolbarHeight,
+                  title: widget.customTitle != null
+                      ? Text(widget.customTitle!)
+                      : Form(
+                          key: _filenameFormKey,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          child: TextFormField(
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                            ),
+                            controller: filenameTextEditingController,
+                            onChanged: renameFile,
+                            autofocus: needsNaming,
+                            validator: _validateFilenameTextField,
                           ),
-                          controller: filenameTextEditingController,
-                          onChanged: renameFile,
-                          autofocus: needsNaming,
-                          validator: _validateFilenameTextField,
                         ),
+                  leading: SaveIndicator(
+                    savingState: savingState,
+                    triggerSave: saveToFile,
+                  ),
+                  actions: [
+                    IconButton(
+                      icon: const AdaptiveIcon(
+                        icon: Icons.insert_page_break,
+                        cupertinoIcon: CupertinoIcons.add,
                       ),
-                leading: SaveIndicator(
-                  savingState: savingState,
-                  triggerSave: saveToFile,
+                      tooltip: t.editor.menu.insertPage,
+                      onPressed: () => setState(() {
+                        final currentPageIndex = this.currentPageIndex;
+                        insertPageAfter(currentPageIndex);
+                        CanvasGestureDetector.scrollToPage(
+                          pageIndex: currentPageIndex + 1,
+                          pages: coreInfo.pages,
+                          screenWidth: MediaQuery.sizeOf(context).width,
+                          transformationController: _transformationController,
+                        );
+                      }),
+                    ),
+                    IconButton(
+                      icon: const AdaptiveIcon(
+                        icon: Icons.grid_view,
+                        cupertinoIcon: CupertinoIcons.rectangle_grid_2x2,
+                      ),
+                      tooltip: t.editor.pages,
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AdaptiveAlertDialog(
+                            title: Text(t.editor.pages),
+                            content: pageManager(context),
+                            actions: const [],
+                          ),
+                        );
+                      },
+                    ),
+                    IconButton(
+                      icon: const AdaptiveIcon(
+                        icon: Icons.more_vert,
+                        cupertinoIcon: CupertinoIcons.ellipsis_vertical,
+                      ),
+                      onPressed: () {
+                        showModalBottomSheet(
+                          context: context,
+                          builder: (context) => bottomSheet(context),
+                          isScrollControlled: true,
+                          showDragHandle: true,
+                          backgroundColor: colorScheme.surface,
+                          constraints: const BoxConstraints(maxWidth: 500),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-                actions: [
-                  IconButton(
-                    icon: const AdaptiveIcon(
-                      icon: Icons.insert_page_break,
-                      cupertinoIcon: CupertinoIcons.add,
-                    ),
-                    tooltip: t.editor.menu.insertPage,
-                    onPressed: () => setState(() {
-                      final currentPageIndex = this.currentPageIndex;
-                      insertPageAfter(currentPageIndex);
-                      CanvasGestureDetector.scrollToPage(
-                        pageIndex: currentPageIndex + 1,
-                        pages: coreInfo.pages,
-                        screenWidth: MediaQuery.sizeOf(context).width,
-                        transformationController: _transformationController,
-                      );
-                    }),
-                  ),
-                  IconButton(
-                    icon: const AdaptiveIcon(
-                      icon: Icons.grid_view,
-                      cupertinoIcon: CupertinoIcons.rectangle_grid_2x2,
-                    ),
-                    tooltip: t.editor.pages,
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AdaptiveAlertDialog(
-                          title: Text(t.editor.pages),
-                          content: pageManager(context),
-                          actions: const [],
-                        ),
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const AdaptiveIcon(
-                      icon: Icons.more_vert,
-                      cupertinoIcon: CupertinoIcons.ellipsis_vertical,
-                    ),
-                    onPressed: () {
-                      showModalBottomSheet(
-                        context: context,
-                        builder: (context) => bottomSheet(context),
-                        isScrollControlled: true,
-                        showDragHandle: true,
-                        backgroundColor: colorScheme.surface,
-                        constraints: const BoxConstraints(maxWidth: 500),
-                      );
-                    },
-                  ),
-                ],
-              ),
-        body: body,
-        floatingActionButton:
-            (DynamicMaterialApp.isFullscreen &&
-                !stows.editorToolbarShowInFullscreen.value)
-            ? FloatingActionButton(
-                shape: platform.isCupertino ? const CircleBorder() : null,
-                onPressed: () {
-                  DynamicMaterialApp.setFullscreen(false, updateSystem: true);
-                },
-                child: const Icon(Icons.fullscreen_exit),
-              )
-            : null,
+          body: body,
+          floatingActionButton:
+              (DynamicMaterialApp.isFullscreen &&
+                  !stows.editorToolbarShowInFullscreen.value)
+              ? FloatingActionButton(
+                  shape: platform.isCupertino ? const CircleBorder() : null,
+                  onPressed: () {
+                    DynamicMaterialApp.setFullscreen(false, updateSystem: true);
+                  },
+                  child: const Icon(Icons.fullscreen_exit),
+                )
+              : null,
+        ),
       ),
     );
   }
@@ -2101,6 +2133,8 @@ class EditorState extends State<Editor> {
 
   @override
   void dispose() {
+    stows.stylusPriority.removeListener(_updateStylusPriority);
+    _stylusPriority.dispose();
     unawaited(_cleanUpAsync());
 
     DynamicMaterialApp.removeFullscreenListener(_setState);

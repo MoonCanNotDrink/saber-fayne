@@ -419,6 +419,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                 ),
 
+                if (defaultTargetPlatform == TargetPlatform.android && !kIsWeb)
+                  SettingsSwitch(
+                    title: t.settings.prefLabels.stylusPriority,
+                    subtitle: t.settings.prefDescriptions.stylusPriority,
+                    icon: Icons.front_hand_outlined,
+                    pref: stows.stylusPriority,
+                  ),
                 SettingsSubtitle(subtitle: t.settings.prefCategories.editor),
                 SettingsSelection(
                   title: t.settings.prefLabels.editorToolbarAlignment,

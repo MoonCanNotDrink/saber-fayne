@@ -704,6 +704,9 @@ class Translations$settings$prefLabels$en {
 	/// en: 'Auto-disable finger drawing'
 	String get autoDisableFingerDrawingWhenStylusDetected => 'Auto-disable finger drawing';
 
+	/// en: 'Stylus priority / palm rejection'
+	String get stylusPriority => 'Stylus priority / palm rejection';
+
 	/// en: 'Prompt you to rename new notes'
 	String get editorPromptRename => 'Prompt you to rename new notes';
 
@@ -762,6 +765,9 @@ class Translations$settings$prefDescriptions$en {
 
 	/// en: 'Turn off finger drawing when a stylus is detected'
 	String get autoDisableFingerDrawingWhenStylusDetected => 'Turn off finger drawing when a stylus is detected';
+
+	/// en: 'Block finger gestures and editing controls while the pen is active. Finger input resumes 400 ms after pen activity ends. Experimental; off by default.'
+	String get stylusPriority => 'Block finger gestures and editing controls while the pen is active. Finger input resumes 400 ms after pen activity ends. Experimental; off by default.';
 
 	/// en: 'You can always rename notes later'
 	String get editorPromptRename => 'You can always rename notes later';

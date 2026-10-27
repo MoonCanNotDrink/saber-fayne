@@ -201,6 +201,13 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// Android editor palm rejection, opt-in until real-device validation.
+  final stylusPriority = PlainStow(
+    'stylusPriority',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
   /// People don't know to turn off finger drawing when using a stylus,
   /// so we can do it automatically.
   final autoDisableFingerDrawingWhenStylusDetected = PlainStow(
