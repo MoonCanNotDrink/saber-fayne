@@ -78,9 +78,14 @@ jobs:
       - name: Build independently installable ARM64 test APK
         env:
           ORG_GRADLE_PROJECT_saberTestApk: 'true'
-        run: >-
-          flutter build apk --release --no-pub --flavor stylusTest
-          --target-platform android-arm64 --dart-define=UPDATE_CHECK=false
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --no-pub also skips release plugin registration in this pinned SDK.
+          # Regenerate it so dev-only plugins are absent from the release APK.
+          flutter build apk --release --flavor stylusTest \
+            --target-platform android-arm64 --dart-define=UPDATE_CHECK=false
+          git diff --exit-code -- pubspec.yaml pubspec.lock
 
       - name: Verify actual APK identity, signature and checksum
         shell: bash
