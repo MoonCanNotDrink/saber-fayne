@@ -89,6 +89,13 @@ jobs:
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose --print-certs output/Saber-Fayne-Stylus-Test-arm64.apk > output/apk-signature.txt
           cd output
           sha256sum Saber-Fayne-Stylus-Test-arm64.apk > SHA256SUMS
+          {
+            printf 'Source commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'APK identity, callback isolation, provider authorities, and signature checks passed.\n\n'
+            printf 'APK SHA-256:\n\n```text\n'
+            cat SHA256SUMS
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload verified test APK
         uses: actions/upload-artifact@v7
